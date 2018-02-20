@@ -1,64 +1,127 @@
 library(tidyverse)
 library(ggthemes)
 library(fs)
-#https://github.com/rCarto/photon
-library(photon)
-library(ggmap)
-#https://github.com/ropensci/geonames
-library(geonames)
-library(brazilmaps)
+#library(sf) will not install
+library(osfr)
+library(sp)
+library(geosphere)
+library(parallel)
+#https://www.r-bloggers.com/speed-up-your-code-parallel-processing-with-multidplyr/
+#library(multidplyr)
 
-brazil_pop <- pop2017 %>%
-  mutate( muni_code = as.character(mun)) %>%
-  as.tibble() %>%
-  select(-mun)
+#(cl <- detectCores()-1)
+#cluster <- create_cluster(cores = cl)
 
-write_csv(brazil_pop, "hathaway/brazil_pop.csv")
 
 if (!"snsc" %in% ls())
   load("data/snsc_all.Rdata")
 
-load("data/geo/state_muni_codes.Rdata")
 
-locales <- muni_codes %>%
-  left_join(state_codes) %>% 
-  left_join(brazil_pop) %>%
-  as.tibble() %>%
-  mutate(muni_state_name = paste(muni_name, state_name, sep = ", "))
-
-
-
-#glimpse(snsc)
-
-options(geonamesUsername="hathawayj")
-
-
-spat_details <- function(x){
+for (i in 2008:2015){
   
-  location <- photon::geocode(x)[1,]
-  height <- GNgtopo30(lat = location$lat, lng = location$lon) # returns meter height
-  location$elev_m <- height$gtopo30
-  location$elev_f <- location$elev_m * 3.28084
-  print(x)
-  print(height)
-  cat(paste(location$lat, location$lon, x, "\n", sep = "_"), file = "hathaway/data_notes.md", append = TRUE)
-  location
+  path <- paste0("data/byyear/snsc_",i,".Rds")
+  dat_year <- snsc %>% 
+    as.tibble() %>%
+    filter(birth_year == i) %>%
+    mutate(m_muni_code = as.character(m_muni_code),
+           birth_muni_code = as.character(birth_muni_code))
+  write_rds(dat_year, path)
+  osfr::upload_file(id = "nxh36", path = path, dest = path)
+  print(i)
+    
 }
 
-spatial_locales <- locales %>%
-  arrange(muni_state_name) %>%
-  split(.$muni_state_name) %>%
-  map(~spat_details(.x$muni_state_name))
 
-spatial_locales_tbl <- bind_rows(spatial_locales) %>%
-  mutate(muni_state_name = names(spatial_locales)) %>%
-  as.tibble()
+### On local computer
+### 
+### 
 
-dat <- locales %>% 
-  left_join(spatial_locales_tbl) %>%
-  filter(!is.na(lat))
+for (i in 2001:2015){
+  
+  for (state_use in c("AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", 
+                      "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", 
+                      "RO", "RR", "SC", "SP", "SE", "TO") ){
+    
+    #state_use <- "SP"
+    dat_year <- read_rds(paste0("data/byyear/snsc_", i, ".Rds"))
+    
+    snsc_yearn <- dat_year %>%
+      filter(!is.na(race), !is.na(sex), !is.na(deliv_type), !is.na(gest_weeks), !is.na(birth_state_code), preg_type == "Singleton") %>%
+      filter(birth_state_code %in% c(state_use)) %>%
+      group_by(race, gest_weeks, deliv_type, sex) %>%
+      summarise(n = n()) %>%
+      ungroup() %>%
+      mutate(deliv_count = str_c(str_sub(deliv_type, 1, 1), n)) %>%
+      group_by(race, gest_weeks, sex) %>%
+      summarise(deliv_count = paste(deliv_count, collapse = "\n")) %>%
+      ungroup()
+    
+    
+    
+    plot_year <- dat_year %>%
+      filter(!is.na(race), !is.na(sex), !is.na(deliv_type), !is.na(gest_weeks), !is.na(birth_state_code), preg_type == "Singleton") %>%
+      filter(birth_state_code %in% c(state_use)) %>%
+      ggplot(aes(x = gest_weeks, y = brthwt_g)) +
+      geom_boxplot(aes(color = deliv_type)) +
+      scale_color_manual(values = c("black", "darkgrey")) +
+      coord_cartesian(ylim = c(0, 7000)) +
+      facet_grid(sex~race) +
+      geom_hline(yintercept = 2500, linetype = "dashed", color = "darkgrey") +
+      geom_text(data = snsc_yearn, aes(label = deliv_count), y = 6200, size = 2.5) +
+      theme_bw() +
+      theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+      labs(x = "Gestational Weeks at Birth", y = "Weight at birth (grams)", color = "Delivery\ntype",
+           title = paste0("Birth weight distribution for singleton births in ", i), subtitle = paste0(state_use, ", Brazil"))
+           
+    ggsave(plot_year,filename = paste0("hathaway/results/","brazil_", state_use, "_", i, ".png"), width = 15, height = 10)
+    
+           
+  } # end state
+} # end year loop
 
-write_rds(dat, "data/state_muni_latlong_pop2017.Rds")
+# osf login
+login(pat = "")
+download_files(id = "7buxm",  path = "data/", private = TRUE)
+
+muni_dat <- read_rds("data/state_muni_codes_latlong_elev_pop2017.Rds") 
+
+muni_mom <- muni_dat %>%
+  select(muni_code, muni_state_name, state_code, region_code, lon, lat, elev_m) %>%
+  rename_all(.funs = function(x) paste0(x,"_mom"))  %>%
+  rename(m_muni_code = muni_code_mom) %>%
+  mutate(m_muni_code = as.integer(m_muni_code))
+
+muni_birth <- muni_dat %>%
+  select(muni_code, muni_state_name, state_code, region_code, lon, lat, elev_m, pop2017) %>%
+  rename_all(.funs = function(x) paste0(x,"_birth")) %>%
+  rename(birth_muni_code = muni_code_birth) %>%
+  mutate(birth_muni_code = as.integer(birth_muni_code))
+
+snsc_full <- snsc_grouped %>%
+  left_join(muni_mom) %>%
+  left_join(muni_birth)
+
+baby_dist <- geosphere::distm(select(snsc_full,lon_birth, lat_birth), select(snsc_full,lon_mom, lat_mom))
+
+#library(geosphere)
+#distm(c(lon1, lat1), c(lon2, lat2), fun = distHaversine)
+
+muni_dat %>%
+  group_by(state_code, state_name, region_code, region_name) %>%
+  summarise(elev_m_weighted = weighted.mean(elev_m, pop2017, na.rm = TRUE), 
+            elev_m = mean(elev_m, na.rm = TRUE), pop2017 = sum(pop2017, na.rm = TRUE)) %>%
+  arrange(region_name, state_name) %>%
+  data.frame()
+
+#wget ftp://ftp.unidata.ucar.edu/pub/udunits/udunits-2.2.26.tar.gz
+#tar zxf udunits-2.2.26.tar.gz
+#cd ./udunits-2.2.26/
+#./configure
+# make
+# sudo make install
+# sudo ldconfig
+# 
+
 
 # https://www.sciencedaily.com/releases/2009/05/090518101908.htm
 # https://www.ncbi.nlm.nih.gov/pubmed/7068485
@@ -71,18 +134,5 @@ write_rds(dat, "data/state_muni_latlong_pop2017.Rds")
 # The normal weight of a baby who reaches full term between 37 and 40 weeks is 2.7-4.1kg (6 - 9 lbs), with an average weight of 3.5kg (7.7 lbs). A baby who weighs less than 2.5kg (5.5 lbs) is considered to have a low birth weight.Dec 12, 2017
 # 
 # 
-# https://stackoverflow.com/questions/32504880/street-address-to-geolocation-lat-long
-# geocodeAdddress <- function(address) {
-#   require(RJSONIO)
-#   url <- "http://maps.google.com/maps/api/geocode/json?address="
-#   url <- URLencode(paste(url, address, "&sensor=false", sep = ""))
-#   x <- fromJSON(url, simplify = FALSE)
-#   if (x$status == "OK") {
-#     out <- c("lat" = x$results[[1]]$geometry$location$lat, 
-#              "lng" = x$results[[1]]$geometry$location$lng)
-#   } else {
-#     out <- NA
-#   }
-#   Sys.sleep(0.2)  # API only allows 5 requests per second
-#   out
-# }
+# Smoking and altitude is a double whammy http://www.scielo.br/scielo.php?script=sci_arttext&pid=S0034-89102016000200313
+# 

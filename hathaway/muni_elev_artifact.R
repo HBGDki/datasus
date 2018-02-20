@@ -32,7 +32,7 @@ spat_details <- function(x){
   location$elev_f <- location$elev_m * 3.28084
   print(x)
   print(height)
-   cat(paste(height$srtm3, location$lat, location$lon, x, "\n", sep = "_"), file = "hathaway/data_notes_srtm3.md", append = TRUE)
+#   cat(paste(height$srtm3, location$lat, location$lon, x, "\n", sep = "_"), file = "hathaway/data_notes_srtm3.md", append = TRUE)
   location
 }
 
