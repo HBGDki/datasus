@@ -1,89 +1,17 @@
 library(tidyverse)
 library(ggthemes)
 library(fs)
-#library(sf) will not install
 library(osfr)
 library(sp)
 library(geosphere)
-library(parallel)
-#https://www.r-bloggers.com/speed-up-your-code-parallel-processing-with-multidplyr/
-#library(multidplyr)
-
-#(cl <- detectCores()-1)
-#cluster <- create_cluster(cores = cl)
 
 
-if (!"snsc" %in% ls())
-  load("data/snsc_all.Rdata")
-
-
-for (i in 2008:2015){
-  
-  path <- paste0("data/byyear/snsc_",i,".Rds")
-  dat_year <- snsc %>% 
-    as.tibble() %>%
-    filter(birth_year == i) %>%
-    mutate(m_muni_code = as.character(m_muni_code),
-           birth_muni_code = as.character(birth_muni_code))
-  write_rds(dat_year, path)
-  osfr::upload_file(id = "nxh36", path = path, dest = path)
-  print(i)
-    
-}
-
-
-### On local computer
-### 
-### 
-
-for (i in 2001:2015){
-  
-  for (state_use in c("AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", 
-                      "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", 
-                      "RO", "RR", "SC", "SP", "SE", "TO") ){
-    
-    #state_use <- "SP"
-    dat_year <- read_rds(paste0("data/byyear/snsc_", i, ".Rds"))
-    
-    snsc_yearn <- dat_year %>%
-      filter(!is.na(race), !is.na(sex), !is.na(deliv_type), !is.na(gest_weeks), !is.na(birth_state_code), preg_type == "Singleton") %>%
-      filter(birth_state_code %in% c(state_use)) %>%
-      group_by(race, gest_weeks, deliv_type, sex) %>%
-      summarise(n = n()) %>%
-      ungroup() %>%
-      mutate(deliv_count = str_c(str_sub(deliv_type, 1, 1), n)) %>%
-      group_by(race, gest_weeks, sex) %>%
-      summarise(deliv_count = paste(deliv_count, collapse = "\n")) %>%
-      ungroup()
-    
-    
-    
-    plot_year <- dat_year %>%
-      filter(!is.na(race), !is.na(sex), !is.na(deliv_type), !is.na(gest_weeks), !is.na(birth_state_code), preg_type == "Singleton") %>%
-      filter(birth_state_code %in% c(state_use)) %>%
-      ggplot(aes(x = gest_weeks, y = brthwt_g)) +
-      geom_boxplot(aes(color = deliv_type)) +
-      scale_color_manual(values = c("black", "darkgrey")) +
-      coord_cartesian(ylim = c(0, 7000)) +
-      facet_grid(sex~race) +
-      geom_hline(yintercept = 2500, linetype = "dashed", color = "darkgrey") +
-      geom_text(data = snsc_yearn, aes(label = deliv_count), y = 6200, size = 2.5) +
-      theme_bw() +
-      theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
-      labs(x = "Gestational Weeks at Birth", y = "Weight at birth (grams)", color = "Delivery\ntype",
-           title = paste0("Birth weight distribution for singleton births in ", i), subtitle = paste0(state_use, ", Brazil"))
-           
-    ggsave(plot_year,filename = paste0("hathaway/results/","brazil_", state_use, "_", i, ".png"), width = 15, height = 10)
-    
-           
-  } # end state
-} # end year loop
 
 # osf login
 login(pat = "")
 download_files(id = "7buxm",  path = "data/", private = TRUE)
 
-muni_dat <- read_rds("data/state_muni_codes_latlong_elev_pop2017.Rds") 
+muni_dat <- read_rds("data/geo/state_muni_codes_latlong_elev_pop2017.Rds") 
 
 muni_mom <- muni_dat %>%
   select(muni_code, muni_state_name, state_code, region_code, lon, lat, elev_m) %>%
@@ -96,6 +24,8 @@ muni_birth <- muni_dat %>%
   rename_all(.funs = function(x) paste0(x,"_birth")) %>%
   rename(birth_muni_code = muni_code_birth) %>%
   mutate(birth_muni_code = as.integer(birth_muni_code))
+
+
 
 snsc_full <- snsc_grouped %>%
   left_join(muni_mom) %>%
@@ -136,3 +66,56 @@ muni_dat %>%
 # 
 # Smoking and altitude is a double whammy http://www.scielo.br/scielo.php?script=sci_arttext&pid=S0034-89102016000200313
 # 
+
+
+
+#### Push Lot's of Graphs ######
+
+# 
+# for (i in 2015:2001){
+#   
+#   for (state_use in c("AC", "AL", "AP", "AM", "BA", "CE", "DF", "ES", "GO", "MA", 
+#                       "MT", "MS", "MG", "PA", "PB", "PR", "PE", "PI", "RJ", "RN", "RS", 
+#                       "RO", "RR", "SC", "SP", "SE", "TO") ){
+#     
+#     #state_use <- "SP"
+#     #dat_year <- read_rds(paste0("data/byyear/snsc_", i, ".Rds"))
+#     dat_year <- snsc %>% 
+#       as.tibble() %>%
+#       filter(birth_year == i) %>%
+#       mutate(m_muni_code = as.character(m_muni_code),
+#              birth_muni_code = as.character(birth_muni_code))
+#     
+#     snsc_yearn <- dat_year %>%
+#       filter(!is.na(race), !is.na(sex), !is.na(deliv_type), !is.na(gest_weeks), !is.na(birth_state_code), preg_type == "Singleton") %>%
+#       filter(birth_state_code %in% c(state_use)) %>%
+#       group_by(race, gest_weeks, deliv_type, sex) %>%
+#       summarise(n = n()) %>%
+#       ungroup() %>%
+#       mutate(deliv_count = str_c(str_sub(deliv_type, 1, 1), n)) %>%
+#       group_by(race, gest_weeks, sex) %>%
+#       summarise(deliv_count = paste(deliv_count, collapse = "\n")) %>%
+#       ungroup()
+#     
+#     
+#     
+#     plot_year <- dat_year %>%
+#       filter(!is.na(race), !is.na(sex), !is.na(deliv_type), !is.na(gest_weeks), !is.na(birth_state_code), preg_type == "Singleton") %>%
+#       filter(birth_state_code %in% c(state_use)) %>%
+#       ggplot(aes(x = gest_weeks, y = brthwt_g)) +
+#       geom_boxplot(aes(color = deliv_type)) +
+#       scale_color_manual(values = c("black", "darkgrey")) +
+#       coord_cartesian(ylim = c(0, 7000)) +
+#       facet_grid(sex~race) +
+#       geom_hline(yintercept = 2500, linetype = "dashed", color = "darkgrey") +
+#       geom_text(data = snsc_yearn, aes(label = deliv_count), y = 6200, size = 2.5) +
+#       theme_bw() +
+#       theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+#       labs(x = "Gestational Weeks at Birth", y = "Weight at birth (grams)", color = "Delivery\ntype",
+#            title = paste0("Birth weight distribution for singleton births in ", i), subtitle = paste0(state_use, ", Brazil"))
+#            
+#     ggsave(plot_year,filename = paste0("hathaway/results/","brazil_", state_use, "_", i, ".png"), width = 15, height = 10)
+#     print(i)
+#            
+#   } # end state
+# } # end year loop
