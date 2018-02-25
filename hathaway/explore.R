@@ -5,7 +5,7 @@ library(osfr)
 library(sp)
 library(geosphere)
 
-
+  
 
 # osf login
 login(pat = "")

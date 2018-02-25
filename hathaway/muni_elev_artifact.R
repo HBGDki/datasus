@@ -60,6 +60,11 @@ brazil_pop <- read_csv("hathaway/brazil_pop.csv", col_types =
                          cols(nome_mun = col_character(),
                               pop2017 = col_integer(),
                               muni_code = col_character()))
+brazil_codes <- read_csv("data/artifacts/Brazil_Municipal_Identifiers.csv")
+
+brazil_segregation <- read_csv("data/artifacts/Segregation.csv")
+
+brazil_extra <- brazil_codes %>% left_join(brazil_segregation)
 
 
 load("data/geo/state_muni_codes.Rdata")
@@ -89,18 +94,27 @@ dat <- locales %>%
   left_join(spatial_locales_tbl) 
 
 # one elevation was wrong
-# https://www.google.com/maps/place/Pilar+-+State+of+Paraíba,+Brazil/@-7.2856667,-35.3413584,12z/data=!3m1!4b1!4m5!3m4!1s0x7ac6054ba1d50ab:0x6ed1016faf316902!8m2!3d-7.2787651!4d-35.2697802
+# https://www.google.com/maps/place/Pilar+-+State+of+Para?ba,+Brazil/@-7.2856667,-35.3413584,12z/data=!3m1!4b1!4m5!3m4!1s0x7ac6054ba1d50ab:0x6ed1016faf316902!8m2!3d-7.2787651!4d-35.2697802
 dat[dat$muni_state_name == "Pilar, Parabia",c("elev_m", "elev_f")] <- c(35, 115)
 
 # lat longs and elevations that don't come from place or boundary are assumed to be wrong
 dat[!dat$osm_key %in% c("place", "boundary"), c("lat", "lon", "elev_m", "elev_f")] <- NA
 
-dat_fix <- dat %>%
-  filter(osm_key %in% c("boundary"))
+# dat_fix <- dat %>%
+#   filter(osm_key %in% c("boundary"))
+# 
+# dat_fix %>% select(muni_state_name, elev_m, elev_f, lat, lon, osm_key)
 
-dat_fix %>% select(muni_state_name, elev_m, elev_f, lat, lon, osm_key)
+# dat <- read_rds("data/geo/state_muni_codes_latlong_elev_pop2017.Rds")
 
-write_rds(dat, "data/state_muni_latlong_pop2017.Rds")
+dat <- dat %>%
+  rename(ibge7_code = muni_code) %>%
+  mutate(ibge7_code = parse_integer(ibge7_code)) %>%
+  left_join(brazil_extra) %>%
+  select(ibge7_code, ibge6_code, tse_code, mesoregion, microregion, UF, everything()) %>%
+  select(-nome_mun, -name, -housenumber, -street, -city)
+
+write_rds(dat, "data/state_muni_latlong_elev_pop2017.Rds")
 
 osfr::upload_file(id = "nxh36", path = "data/state_muni_latlong_pop2017.Rds", dest = "data/geo/state_muni_codes_latlong_elev_pop2017.Rds")
 
